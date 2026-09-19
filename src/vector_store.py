@@ -1,243 +1,217 @@
 """
-Vector Store Manager Module
-Supports: Qdrant (primary), Pinecone, Weaviate, Chroma
+Neo4j Vector Store Manager
+
+Handles vector indexing and similarity search using Neo4j's native vector indexes.
 """
 
-import os
 from typing import List, Dict, Any, Optional
-from abc import ABC, abstractmethod
+from sentence_transformers import SentenceTransformer
+import numpy as np
 
 
-class VectorStoreManager:
-    """Manage vector storage across different backends"""
+class Neo4jVectorStore:
+    """
+    Manages vector embeddings and similarity search using Neo4j's native vector indexes.
     
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.provider = config.get('provider', 'qdrant')
-        self._store = None
-        self._embeddings = None
-        
-    def _initialize_embeddings(self):
-        """Initialize embedding model"""
-        emb_config = self.config.get('embedding', {})
-        provider = emb_config.get('provider', 'sentence-transformers')
-        model_name = emb_config.get('model', 'all-MiniLM-L6-v2')
-        
-        if provider == 'sentence-transformers':
-            from langchain_community.embeddings import HuggingFaceEmbeddings
-            self._embeddings = HuggingFaceEmbeddings(model_name=model_name)
-        elif provider == 'openai':
-            from langchain_openai import OpenAIEmbeddings
-            api_key = emb_config.get('openai_api_key') or os.getenv('OPENAI_API_KEY')
-            self._embeddings = OpenAIEmbeddings(api_key=api_key)
-        elif provider == 'ollama':
-            from langchain_community.embeddings import OllamaEmbeddings
-            base_url = emb_config.get('ollama_base_url', 'http://localhost:11434')
-            self._embeddings = OllamaEmbeddings(base_url=base_url, model=model_name)
-        else:
-            raise ValueError(f"Unsupported embedding provider: {provider}")
-        
-        return self._embeddings
+    Neo4j provides native vector search capabilities through its vector index feature,
+    eliminating the need for external vector databases.
+    """
     
-    def get_embeddings(self):
-        """Get or create embeddings instance"""
-        if self._embeddings is None:
-            self._initialize_embeddings()
-        return self._embeddings
-    
-    def initialize(self):
-        """Initialize the vector store based on provider"""
-        if self.provider == 'qdrant':
-            self._init_qdrant()
-        elif self.provider == 'pinecone':
-            self._init_pinecone()
-        elif self.provider == 'weaviate':
-            self._init_weaviate()
-        elif self.provider == 'chroma':
-            self._init_chroma()
-        else:
-            raise ValueError(f"Unsupported vector DB provider: {self.provider}")
-        
-        return self._store
-    
-    def _init_qdrant(self):
-        """Initialize Qdrant vector store"""
-        from langchain_qdrant import QdrantVectorStore
-        from qdrant_client import QdrantClient
-        
-        qdrant_config = self.config.get('qdrant', {})
-        host = qdrant_config.get('host', 'localhost')
-        port = qdrant_config.get('port', 6333)
-        https = qdrant_config.get('https', False)
-        api_key = qdrant_config.get('api_key') or os.getenv('QDRANT_API_KEY')
-        collection_name = qdrant_config.get('collection_name', 'knowledge_graph_chunks')
-        vector_size = qdrant_config.get('vector_size', 768)
-        
-        # Initialize client
-        client_params = {
-            'url': f"http{'s' if https else ''}://{host}:{port}",
-        }
-        if api_key:
-            client_params['api_key'] = api_key
-        
-        client = QdrantClient(**client_params)
-        
-        # Get embeddings to determine vector size
-        embeddings = self.get_embeddings()
-        
-        # Create collection if it doesn't exist
-        try:
-            collections = client.get_collections().collections
-            collection_exists = any(c.name == collection_name for c in collections)
-            
-            if not collection_exists:
-                from qdrant_client.http.models import Distance, VectorParams
-                client.create_collection(
-                    collection_name=collection_name,
-                    vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE)
-                )
-        except Exception as e:
-            print(f"Warning: Could not check/create collection: {e}")
-        
-        self._store = QdrantVectorStore(
-            client=client,
-            collection_name=collection_name,
-            embedding=embeddings,
-        )
-        
-    def _init_pinecone(self):
-        """Initialize Pinecone vector store"""
-        from langchain_community.vectorstores import Pinecone
-        import pinecone
-        
-        pinecone_config = self.config.get('pinecone', {})
-        api_key = pinecone_config.get('api_key') or os.getenv('PINECONE_API_KEY')
-        environment = pinecone_config.get('environment', 'us-west1-gcp')
-        index_name = pinecone_config.get('index_name', 'knowledge-graph')
-        
-        pinecone.init(api_key=api_key, environment=environment)
-        
-        embeddings = self.get_embeddings()
-        
-        self._store = Pinecone.from_existing_index(
-            index_name=index_name,
-            embedding=embeddings
-        )
-        
-    def _init_weaviate(self):
-        """Initialize Weaviate vector store"""
-        from langchain_community.vectorstores import Weaviate
-        import weaviate
-        
-        weaviate_config = self.config.get('weaviate', {})
-        url = weaviate_config.get('url', 'http://localhost:8080')
-        api_key = weaviate_config.get('api_key') or os.getenv('WEAVIATE_API_KEY')
-        class_name = weaviate_config.get('class_name', 'KnowledgeGraphChunk')
-        
-        auth_config = None
-        if api_key:
-            auth_config = weaviate.auth.AuthApiKey(api_key=api_key)
-        
-        client = weaviate.Client(url=url, auth_client_secret=auth_config)
-        
-        embeddings = self.get_embeddings()
-        
-        self._store = Weaviate(
-            client=client,
-            index_name=class_name,
-            text_key="content",
-            embedding=embeddings,
-            by_text=False,
-        )
-        
-    def _init_chroma(self):
-        """Initialize Chroma vector store"""
-        from langchain_community.vectorstores import Chroma
-        
-        chroma_config = self.config.get('chroma', {})
-        persist_directory = chroma_config.get('persist_directory', './chroma_db')
-        collection_name = chroma_config.get('collection_name', 'knowledge_graph')
-        
-        embeddings = self.get_embeddings()
-        
-        self._store = Chroma(
-            collection_name=collection_name,
-            embedding_function=embeddings,
-            persist_directory=persist_directory,
-        )
-    
-    def add_documents(self, documents: List[Dict[str, Any]], 
-                     batch_size: int = 32) -> List[str]:
+    def __init__(self, neo4j_driver, embedding_model: str = "all-MiniLM-L6-v2", 
+                 index_name: str = "chunk_embeddings", label: str = "Chunk"):
         """
-        Add documents to the vector store
+        Initialize Neo4j Vector Store.
         
         Args:
-            documents: List of dicts with 'content' and 'metadata'
-            batch_size: Number of documents to add at once
+            neo4j_driver: Neo4j driver instance
+            embedding_model: Name of the sentence transformer model to use
+            index_name: Name of the vector index in Neo4j
+            label: Node label for chunks
+        """
+        self.driver = neo4j_driver
+        self.embedding_model = SentenceTransformer(embedding_model)
+        self.index_name = index_name
+        self.label = label
+        # Use the new method name with fallback for older versions
+        try:
+            self.embedding_dim = self.embedding_model.get_embedding_dimension()
+        except AttributeError:
+            self.embedding_dim = self.embedding_model.get_sentence_embedding_dimension()
+        
+    def create_vector_index(self):
+        """
+        Create a vector index in Neo4j for similarity search.
+        """
+        with self.driver.session() as session:
+            # Check if index already exists
+            result = session.run(
+                "SHOW INDEXES WHERE name = $index_name",
+                index_name=self.index_name
+            )
+            existing = result.single()
             
-        Returns:
-            List of document IDs
-        """
-        if self._store is None:
-            self.initialize()
-        
-        from langchain.schema import Document
-        
-        langchain_docs = []
-        for doc in documents:
-            langchain_docs.append(Document(
-                page_content=doc['content'],
-                metadata=doc.get('metadata', {})
-            ))
-        
-        ids = self._store.add_documents(langchain_docs, batch_size=batch_size)
-        return ids
+            if existing:
+                print(f"Vector index '{self.index_name}' already exists.")
+                return
+            
+            # Create vector index
+            session.run(f"""
+                CREATE VECTOR INDEX `{self.index_name}`
+                FOR (n:{self.label})
+                ON n.embedding
+                OPTIONS {{
+                    indexConfig: {{
+                        `vector.dimensions`: {self.embedding_dim},
+                        `vector.similarity_function`: 'cosine'
+                    }}
+                }}
+            """)
+            print(f"Created vector index '{self.index_name}' with dimension {self.embedding_dim}")
     
-    def similarity_search(self, query: str, k: int = 5, 
-                         filter_dict: Optional[Dict] = None) -> List[Dict[str, Any]]:
+    def generate_embedding(self, text: str) -> List[float]:
         """
-        Search for similar documents
+        Generate embedding for a text chunk.
         
         Args:
-            query: Search query
-            k: Number of results to return
-            filter_dict: Optional metadata filters
+            text: Text to embed
             
         Returns:
-            List of matching documents with scores
+            List of floats representing the embedding
         """
-        if self._store is None:
-            self.initialize()
-        
-        results = self._store.similarity_search_with_score(
-            query, 
-            k=k,
-            filter=filter_dict
-        )
-        
-        return [
-            {
-                'content': doc.page_content,
-                'metadata': doc.metadata,
-                'score': float(score)
-            }
-            for doc, score in results
-        ]
+        embedding = self.embedding_model.encode(text, convert_to_numpy=True)
+        return embedding.tolist()
     
-    def delete_documents(self, ids: List[str]) -> bool:
-        """Delete documents by ID"""
-        if self._store is None:
-            self.initialize()
+    def store_chunk(self, chunk_id: str, text: str, metadata: Optional[Dict[str, Any]] = None):
+        """
+        Store a chunk with its embedding in Neo4j.
         
-        try:
-            self._store.delete(ids)
-            return True
-        except Exception as e:
-            print(f"Error deleting documents: {e}")
-            return False
+        Args:
+            chunk_id: Unique identifier for the chunk
+            text: Text content of the chunk
+            metadata: Optional metadata dictionary
+        """
+        embedding = self.generate_embedding(text)
+        
+        with self.driver.session() as session:
+            # Create or merge the chunk node with embedding
+            query = f"""
+                MERGE (c:{self.label} {{id: $chunk_id}})
+                SET c.text = $text,
+                    c.embedding = $embedding
+            """
+            
+            if metadata:
+                for key, value in metadata.items():
+                    query += f", c.{key} = ${key}"
+            
+            session.run(query, chunk_id=chunk_id, text=text, embedding=embedding, **metadata)
     
-    def get_store(self):
-        """Get the underlying vector store instance"""
-        if self._store is None:
-            self.initialize()
-        return self._store
+    def store_chunks_batch(self, chunks: List[Dict[str, Any]]):
+        """
+        Store multiple chunks with their embeddings in Neo4j.
+        
+        Args:
+            chunks: List of dictionaries containing 'id', 'text', and optional 'metadata'
+        """
+        with self.driver.session() as session:
+            for chunk in chunks:
+                chunk_id = chunk['id']
+                text = chunk['text']
+                metadata = chunk.get('metadata', {})
+                
+                embedding = self.generate_embedding(text)
+                
+                # Build dynamic properties
+                props = {
+                    'id': chunk_id,
+                    'text': text,
+                    'embedding': embedding
+                }
+                props.update(metadata)
+                
+                # Create node with all properties
+                set_clauses = []
+                params = {}
+                for i, (key, value) in enumerate(props.items()):
+                    param_name = f"param_{i}"
+                    set_clauses.append(f"c.{key} = ${param_name}")
+                    params[param_name] = value
+                
+                query = f"""
+                    MERGE (c:{self.label} {{id: $chunk_id}})
+                    SET {', '.join(set_clauses)}
+                """
+                params['chunk_id'] = chunk_id
+                
+                session.run(query, **params)
+    
+    def similarity_search(self, query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Perform similarity search using vector index.
+        
+        Args:
+            query_text: Query text to search for similar chunks
+            top_k: Number of results to return
+            
+        Returns:
+            List of dictionaries containing matching chunks and their scores
+        """
+        query_embedding = self.generate_embedding(query_text)
+        
+        with self.driver.session() as session:
+            result = session.run(f"""
+                CALL db.index.vector.queryNodes($index_name, $top_k, $query_embedding)
+                YIELD node AS chunk, score
+                RETURN chunk.id AS id, chunk.text AS text, score
+                ORDER BY score DESC
+            """, index_name=self.index_name, top_k=top_k, query_embedding=query_embedding)
+            
+            matches = []
+            for record in result:
+                matches.append({
+                    'id': record['id'],
+                    'text': record['text'],
+                    'score': record['score']
+                })
+            
+            return matches
+    
+    def get_all_chunks(self) -> List[Dict[str, Any]]:
+        """
+        Retrieve all chunks from the database.
+        
+        Returns:
+            List of all chunk dictionaries
+        """
+        with self.driver.session() as session:
+            result = session.run(f"""
+                MATCH (c:{self.label})
+                RETURN c.id AS id, c.text AS text, properties(c) AS metadata
+            """)
+            
+            chunks = []
+            for record in result:
+                metadata = dict(record['metadata'])
+                metadata.pop('embedding', None)  # Exclude embedding from metadata
+                chunks.append({
+                    'id': record['id'],
+                    'text': record['text'],
+                    'metadata': metadata
+                })
+            
+            return chunks
+    
+    def delete_index(self):
+        """
+        Delete the vector index.
+        """
+        with self.driver.session() as session:
+            session.run(f"DROP INDEX `{self.index_name}` IF EXISTS")
+            print(f"Deleted vector index '{self.index_name}'")
+    
+    def close(self):
+        """
+        Close the Neo4j driver connection.
+        """
+        if self.driver:
+            self.driver.close()

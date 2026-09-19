@@ -3,14 +3,6 @@ langchain>=0.1.0
 langchain-community>=0.0.10
 langchain-openai>=0.0.5
 langchain-text-splitters>=0.3.0
-langchain-qdrant>=0.2.0
-langgraph>=0.0.20
-
-# Vector Databases
-qdrant-client>=1.7.0
-pinecone-client>=3.0.0
-weaviate-client>=4.0.0
-chromadb>=0.4.0
 
 # LLM Providers
 openai>=1.10.0
@@ -29,7 +21,7 @@ nltk>=3.8.0
 spacy>=3.7.0
 sentence-transformers>=2.3.0
 
-# Graph Database
+# Graph Database (includes native vector index support)
 neo4j>=5.15.0
 
 # Visualization
@@ -47,3 +39,6 @@ tqdm>=4.66.0
 # Async support
 aiohttp>=3.9.0
 asyncio>=3.4.3
+
+# NumPy for embeddings
+numpy>=1.24.0

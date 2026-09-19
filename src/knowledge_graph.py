@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .data_sources import DataSourceLoader
 from .chunking import get_chunker
-from .vector_store import VectorStoreManager
+from .vector_store import Neo4jVectorStore
 from .llm_provider import LLMProvider
 from .graph_builder import GraphBuilder
 from .visualizer import GraphVisualizer
@@ -44,14 +44,21 @@ class KnowledgeGraphGenerator:
         
         # Initialize components
         self.data_loader = DataSourceLoader(self.config.get('data_sources', {}))
-        self.vector_store = VectorStoreManager({
-            **self.config.get('vector_db', {}),
-            'embedding': self.config.get('embedding', {})
-        })
+        
+        # Neo4j connection for vector store
+        neo4j_config = self.config.get('neo4j', {})
+        self.neo4j_driver = self._create_neo4j_driver(neo4j_config)
+        self.vector_store = Neo4jVectorStore(
+            neo4j_driver=self.neo4j_driver,
+            embedding_model=self.config.get('embedding', {}).get('model', 'all-MiniLM-L6-v2'),
+            index_name=self.config.get('vector_db', {}).get('index_name', 'chunk_embeddings'),
+            label=self.config.get('vector_db', {}).get('label', 'Chunk')
+        )
+        
         self.llm = LLMProvider(self.config.get('llm', {}))
         self.graph_builder = GraphBuilder()
         self.visualizer = GraphVisualizer(self.config.get('visualization', {}))
-        self.neo4j_exporter = Neo4jExporter(self.config.get('neo4j', {}))
+        self.neo4j_exporter = Neo4jExporter(neo4j_config)
         
         # State tracking
         self.chunks = []
@@ -73,15 +80,10 @@ class KnowledgeGraphGenerator:
                 'max_tokens': 2000
             },
             'vector_db': {
-                'provider': 'qdrant',
-                'qdrant': {
-                    'host': 'localhost',
-                    'port': 6333,
-                    'collection_name': 'knowledge_graph_chunks'
-                }
+                'index_name': 'chunk_embeddings',
+                'label': 'Chunk'
             },
             'embedding': {
-                'provider': 'sentence-transformers',
                 'model': 'all-MiniLM-L6-v2'
             },
             'chunking': {
@@ -96,6 +98,26 @@ class KnowledgeGraphGenerator:
                 'output_file': 'knowledge_graph.html'
             }
         }
+    
+    def _create_neo4j_driver(self, neo4j_config: Dict[str, Any]):
+        """Create Neo4j driver instance"""
+        from neo4j import GraphDatabase
+        
+        uri = neo4j_config.get('uri', 'bolt://localhost:7687')
+        username = neo4j_config.get('username', 'neo4j')
+        password = neo4j_config.get('password', 'password')
+        
+        try:
+            driver = GraphDatabase.driver(uri, auth=(username, password))
+            # Test connection
+            with driver.session() as session:
+                session.run("RETURN 1")
+            print(f"Connected to Neo4j at {uri}")
+            return driver
+        except Exception as e:
+            print(f"Warning: Could not connect to Neo4j: {e}")
+            print("Vector store operations will be unavailable until Neo4j is connected.")
+            return None
     
     def add_data_source(self, source_type: str, **kwargs) -> 'KnowledgeGraphGenerator':
         """
@@ -144,7 +166,7 @@ class KnowledgeGraphGenerator:
     
     def vectorize(self) -> 'KnowledgeGraphGenerator':
         """
-        Vectorize the chunks and store in vector database
+        Vectorize the chunks and store in Neo4j vector index
         
         Returns:
             Self for method chaining
@@ -152,15 +174,30 @@ class KnowledgeGraphGenerator:
         if not self.chunks:
             raise ValueError("No chunks available. Call chunk_data() first.")
         
-        print("Vectorizing chunks...")
-        self.vector_store.add_documents(self.chunks)
+        if not self.neo4j_driver:
+            raise ValueError("Neo4j connection not available. Check your Neo4j configuration.")
+        
+        print("Creating Neo4j vector index...")
+        self.vector_store.create_vector_index()
+        
+        print("Vectorizing chunks and storing in Neo4j...")
+        # Prepare chunks for storage
+        chunks_data = []
+        for i, chunk in enumerate(self.chunks):
+            chunks_data.append({
+                'id': f"chunk_{i}_{chunk.get('metadata', {}).get('source_id', 'unknown')}",
+                'text': chunk['content'],
+                'metadata': chunk.get('metadata', {})
+            })
+        
+        self.vector_store.store_chunks_batch(chunks_data)
         self.is_vectorized = True
-        print("Vectorization complete")
+        print(f"Vectorization complete: {len(chunks_data)} chunks stored in Neo4j")
         return self
     
     def search_similar(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """
-        Search for similar chunks
+        Search for similar chunks using Neo4j vector index
         
         Args:
             query: Search query
@@ -172,7 +209,7 @@ class KnowledgeGraphGenerator:
         if not self.is_vectorized:
             self.vectorize()
         
-        return self.vector_store.similarity_search(query, k=k)
+        return self.vector_store.similarity_search(query, top_k=k)
     
     def extract_entities_and_relationships(self, 
                                           use_batch: bool = True,

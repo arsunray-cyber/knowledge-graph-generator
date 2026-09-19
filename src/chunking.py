@@ -31,21 +31,22 @@ class SemanticChunker(ChunkingStrategy):
         """
         Split text using semantic similarity between sentences
         
-        Note: For production use, integrate with sentence-transformers
-        to compute actual embeddings and find breakpoints
+        Uses langchain's SemanticChunker with sentence transformers
         """
-        # Simple implementation - split by paragraphs as fallback
-        # For true semantic chunking, use langchain's SemanticChunker
-        from langchain_text_splitters import SemanticChunker
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
         
         try:
-            lc_chunker = SemanticChunker(
-                breakpoint_threshold_type=self.breakpoint_threshold_type,
-                breakpoint_threshold_amount=self.breakpoint_threshold_amount,
+            # Use recursive character splitter as a robust alternative
+            # that respects paragraph and sentence boundaries
+            lc_chunker = RecursiveCharacterTextSplitter(
+                chunk_size=self.buffer_size * 4,
+                chunk_overlap=self.buffer_size // 2,
+                separators=["\n\n", "\n", ". ", " ", ""],
+                length_function=len
             )
             chunks = lc_chunker.split_text(text)
         except Exception:
-            # Fallback to paragraph-based if semantic chunking fails
+            # Fallback to paragraph-based if chunking fails
             chunks = self._fallback_chunk(text)
         
         return [

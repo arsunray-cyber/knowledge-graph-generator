@@ -5,7 +5,7 @@ Knowledge Graph Generator - Main Package
 from .knowledge_graph import KnowledgeGraphGenerator
 from .data_sources import DataSourceLoader
 from .chunking import ChunkingStrategy
-from .vector_store import VectorStoreManager
+from .vector_store import Neo4jVectorStore
 from .llm_provider import LLMProvider
 from .graph_builder import GraphBuilder
 from .visualizer import GraphVisualizer
@@ -16,7 +16,7 @@ __all__ = [
     "KnowledgeGraphGenerator",
     "DataSourceLoader",
     "ChunkingStrategy",
-    "VectorStoreManager",
+    "Neo4jVectorStore",
     "LLMProvider",
     "GraphBuilder",
     "GraphVisualizer",

@@ -15,45 +15,20 @@ llm:
   max_tokens: 2000
 
 # Vector Database Configuration
+# Uses Neo4j's native vector indexes - no external vector DB required
 vector_db:
-  # Options: qdrant (primary), pinecone, weaviate, chroma
-  provider: "qdrant"
-  
-  # Qdrant settings
-  qdrant:
-    host: "localhost"
-    port: 6333
-    https: false
-    api_key: "${QDRANT_API_KEY}"
-    collection_name: "knowledge_graph_chunks"
-    vector_size: 768  # Match your embedding model
-    
-  # Pinecone settings (alternative)
-  pinecone:
-    api_key: "${PINECONE_API_KEY}"
-    environment: "us-west1-gcp"
-    index_name: "knowledge-graph"
-    
-  # Weaviate settings (alternative)
-  weaviate:
-    url: "http://localhost:8080"
-    api_key: "${WEAVIATE_API_KEY}"
-    class_name: "KnowledgeGraphChunk"
-    
-  # Chroma settings (alternative)
-  chroma:
-    persist_directory: "./chroma_db"
-    collection_name: "knowledge_graph"
+  # Neo4j vector index name
+  index_name: "chunk_embeddings"
+  # Node label for chunks in Neo4j
+  label: "Chunk"
 
 # Embedding Model Configuration
+# Used to generate embeddings stored in Neo4j vector index
 embedding:
-  # Options: sentence-transformers, openai, ollama
-  provider: "sentence-transformers"
   model: "all-MiniLM-L6-v2"
-  # For OpenAI embeddings
-  openai_api_key: "${OPENAI_API_KEY}"
 
 # Neo4j Configuration
+# Required for vector storage and knowledge graph
 neo4j:
   uri: "bolt://localhost:7687"
   username: "neo4j"
