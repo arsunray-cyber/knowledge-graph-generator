@@ -1,0 +1,122 @@
+# Example configuration file - copy to config.yaml and update with your settings
+
+# LLM Provider Configuration
+llm:
+  # Options: grok, ollama, openrouter
+  provider: "ollama"
+  model: "llama2"
+  # API keys (only required for some providers)
+  grok_api_key: "${GROK_API_KEY}"  # Use environment variable
+  openrouter_api_key: "${OPENROUTER_API_KEY}"
+  # Ollama runs locally, no API key needed
+  ollama_base_url: "http://localhost:11434"
+  # Temperature and other parameters
+  temperature: 0.7
+  max_tokens: 2000
+
+# Vector Database Configuration
+vector_db:
+  # Options: qdrant (primary), pinecone, weaviate, chroma
+  provider: "qdrant"
+  
+  # Qdrant settings
+  qdrant:
+    host: "localhost"
+    port: 6333
+    https: false
+    api_key: "${QDRANT_API_KEY}"
+    collection_name: "knowledge_graph_chunks"
+    vector_size: 768  # Match your embedding model
+    
+  # Pinecone settings (alternative)
+  pinecone:
+    api_key: "${PINECONE_API_KEY}"
+    environment: "us-west1-gcp"
+    index_name: "knowledge-graph"
+    
+  # Weaviate settings (alternative)
+  weaviate:
+    url: "http://localhost:8080"
+    api_key: "${WEAVIATE_API_KEY}"
+    class_name: "KnowledgeGraphChunk"
+    
+  # Chroma settings (alternative)
+  chroma:
+    persist_directory: "./chroma_db"
+    collection_name: "knowledge_graph"
+
+# Embedding Model Configuration
+embedding:
+  # Options: sentence-transformers, openai, ollama
+  provider: "sentence-transformers"
+  model: "all-MiniLM-L6-v2"
+  # For OpenAI embeddings
+  openai_api_key: "${OPENAI_API_KEY}"
+
+# Neo4j Configuration
+neo4j:
+  uri: "bolt://localhost:7687"
+  username: "neo4j"
+  password: "${NEO4J_PASSWORD}"
+  database: "neo4j"
+
+# Data Source Settings
+data_sources:
+  # Website scraping settings
+  website:
+    user_agent: "KnowledgeGraphBot/1.0"
+    max_depth: 2
+    follow_links: true
+    
+  # Document processing settings
+  document:
+    supported_formats: ["pdf", "docx", "txt", "md"]
+    
+  # Database connection (example for PostgreSQL)
+  database:
+    type: "postgresql"
+    host: "localhost"
+    port: 5432
+    database: "mydb"
+    user: "user"
+    password: "${DB_PASSWORD}"
+
+# Chunking Configuration
+chunking:
+  # Default strategy: semantic, paragraph, page, fixed_size
+  default_strategy: "semantic"
+  
+  # Semantic chunking settings
+  semantic:
+    buffer_size: 100
+    breakpoint_threshold_type: "percentile"
+    breakpoint_threshold_amount: 95
+    
+  # Fixed size chunking
+  fixed_size:
+    chunk_size: 500
+    chunk_overlap: 50
+    
+  # Paragraph chunking
+  paragraph:
+    separator: "\n\n"
+    
+  # Page chunking (for documents)
+  page:
+    pages_per_chunk: 1
+
+# Graph Visualization Settings
+visualization:
+  output_file: "knowledge_graph.html"
+  notebook_mode: false
+  height: "750px"
+  width: "100%"
+  bgcolor: "#ffffff"
+  font_color: "#000000"
+
+# Processing Settings
+processing:
+  batch_size: 32
+  max_workers: 4
+  retry_attempts: 3
+  timeout: 60
